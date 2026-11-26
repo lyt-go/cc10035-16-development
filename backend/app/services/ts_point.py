@@ -90,6 +90,20 @@ class TsPointService(BaseModuleService):
             "data": data_points,
         }
 
+    def get_series(self, point_id: str | None = None, device_id: str | None = None) -> list[dict[str, Any]]:
+        """测点的已确认序列：只包含归属核签通过的记录，按实际采样时刻排序。"""
+        rows = list(store.rows("point_series"))
+        if point_id:
+            rows = [r for r in rows if str(r.get("测点编号")) == str(point_id)]
+        if device_id:
+            rows = [r for r in rows if str(r.get("设备编号")) == str(device_id)]
+        rows.sort(key=lambda r: str(r.get("实际采样时刻") or r.get("timestamp") or ""))
+        return rows
+
+    query_series = get_series
+    list_confirmed_records = get_series
+    get_confirmed_readings = get_series
+
     def batch_collect_status(self) -> dict[str, Any]:
         """批量采集状态：统计各设备测点的采集情况。"""
         rows = store.rows(self.MODULE)

@@ -6,6 +6,15 @@
         <p class="page-desc">{{ meta.desc }}</p>
       </div>
       <div class="page-actions">
+        <button
+          v-if="meta.key === 'gateway_mgmt'"
+          class="btn"
+          data-testid="open-attribution-desk"
+          type="button"
+          @click="openDetail()"
+        >
+          移交登记 / 归属处置回执
+        </button>
         <button class="btn primary" data-testid="open-create" type="button" @click="openCreate">
           登记{{ meta.entity }}
         </button>
@@ -50,6 +59,20 @@
           <td v-for="column in meta.fields" :key="column">{{ row[column] ?? '—' }}</td>
           <td>{{ row.status }}</td>
           <td class="row-actions">
+            <template v-if="meta.key === 'gateway_mgmt'">
+              <button
+                class="link"
+                type="button"
+                :data-testid="`action-${row.id}-详情`"
+                @click="openDetail(row)"
+              >详情</button>
+              <button
+                class="link"
+                type="button"
+                :data-testid="`detail-${row.id}`"
+                @click="openDetail(row)"
+              >移交核签</button>
+            </template>
             <button
               v-for="action in meta.actions"
               :key="action"
@@ -86,6 +109,21 @@
       </form>
     </div>
 
+    <div v-if="showDetail" class="modal-backdrop" data-testid="gateway-detail-backdrop" @click.self="showDetail = false">
+      <div class="modal modal-wide" data-testid="gateway-detail" role="dialog" aria-modal="true">
+        <div class="detail-head">
+          <h3>
+            网关详情 · 设备移交与迟到读数归属处置
+            <span v-if="detailGateway" class="detail-gw-name">
+              {{ detailGateway['网关名称'] || detailGateway['网关编号'] }}
+            </span>
+          </h3>
+          <button class="btn ghost" type="button" data-testid="close-detail" @click="showDetail = false">关闭</button>
+        </div>
+        <AttributionDesk :gateway-id="detailGateway ? String(detailGateway['网关编号'] ?? '') : ''" />
+      </div>
+    </div>
+
     <footer class="page-foot">
       <span>共 {{ total }} 条{{ meta.name }}记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
@@ -96,6 +134,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 
+import AttributionDesk from '@/components/AttributionDesk.vue'
 import {
   createEntry,
   downloadEntries,
@@ -115,6 +154,13 @@ const filterFields = meta.fields.slice(0, 3)
 const showCreate = ref(false)
 const creating = ref(false)
 const createValues = ref<Record<string, string>>({})
+const showDetail = ref(false)
+const detailGateway = ref<EntryRow | null>(null)
+
+function openDetail(row?: EntryRow) {
+  detailGateway.value = row ?? null
+  showDetail.value = true
+}
 const stats = computed(() => [
   { label: meta.metrics[0], value: total.value },
   { label: meta.metrics[1], value: rows.value.filter((row) => row.status === meta.statuses[1]).length },
@@ -189,3 +235,25 @@ async function reload() {
 
 onMounted(reload)
 </script>
+
+<style scoped>
+.modal-wide {
+  width: min(1180px, 96vw);
+  padding: 16px 18px;
+}
+.detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.detail-head h3 {
+  margin: 0;
+  font-size: 16px;
+}
+.detail-gw-name {
+  color: var(--brand, #175cd3);
+  margin-left: 8px;
+}
+</style>

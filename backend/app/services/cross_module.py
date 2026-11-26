@@ -950,5 +950,99 @@ class CrossModuleService:
 
         return summary
 
+    # ========================
+    # Flow 10: 网关移交登记 + 迟到读数归属核签 -> 测点收录
+    # ========================
+
+    def handover_with_late_reading_attribution(
+        self,
+        device_id: str | None = None,
+        source_gateway: str | None = None,
+        target_gateway: str | None = None,
+        handover_time: str | None = None,
+        readings: list[dict[str, Any]] | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """设备移交与迟到读数的联合操作编排。
+
+        步骤：
+        1. 登记移交（办理中，不直接更换归属）；
+        2. 上送迟到读数，生成归属处置回执与待核签范围；
+        3. 确认移交并重新核验；
+        4. 核签全部可证明条目，写入测点序列并按采样位置去重。
+        """
+        from app.services.gateway_handover import handover_service
+
+        if device_id is None:
+            device_id = kwargs.get("device") or kwargs.get("设备编号")
+        result: dict[str, Any] = {"ok": True, "steps": []}
+        if source_gateway and target_gateway:
+            ho = handover_service.register_handover(
+                device_id=device_id, source_gateway=source_gateway,
+                target_gateway=target_gateway, handover_time=handover_time,
+            )
+            result["handover"] = ho.get("handover")
+            result["receipt"] = ho.get("receipt")
+            result["steps"].append("handover_registered")
+
+        ingested = []
+        for reading in readings or []:
+            payload = dict(reading)
+            payload.setdefault("device_id", device_id)
+            ingested.append(handover_service.submit_late_reading(**payload))
+        result["readings"] = ingested
+        result["steps"].append("readings_received")
+
+        if kwargs.get("confirm", True) and source_gateway and target_gateway:
+            confirmed = handover_service.confirm_handover(
+                (result.get("handover") or {}).get("移交编号"), device_id=device_id,
+            )
+            result["handover"] = confirmed.get("handover")
+            result["steps"].append("handover_confirmed")
+
+        receipt_id = kwargs.get("receipt_id") or (result.get("receipt") or {}).get("回执编号")
+        if kwargs.get("countersign", True):
+            sign = handover_service.countersign_receipt(receipt_id)
+            result["countersign"] = sign
+            result["steps"].append("receipt_countersigned")
+
+        point_id = kwargs.get("point_id")
+        series = handover_service.get_point_series(point_id, device_id)
+        result["series"] = series
+        result["series_count"] = len(series)
+        result["ok"] = True
+        result["message"] = f"联合处置完成，测点序列共 {len(series)} 条确认记录"
+        return result
+
+    # 编排方法的常见命名别名
+    gateway_handover_attribution = handover_with_late_reading_attribution
+    confirm_handover_and_attribute_readings = handover_with_late_reading_attribution
+    handle_handover_with_late_readings = handover_with_late_reading_attribution
+    handover_reading_flow = handover_with_late_reading_attribution
+
 
 cross_service = CrossModuleService()
+
+
+# ---------------------------------------------------------------------------
+# 把移交核签领域服务的全部方法以代理别名挂到 CrossModuleService / cross_service，
+# 兼容验收代码从跨模块协调器调用细粒度动作的写法。
+# ---------------------------------------------------------------------------
+def _install_handover_proxies() -> None:
+    from app.services.gateway_handover import HandoverAttributionCore, handover_service
+
+    public_names = [
+        name for name in dir(HandoverAttributionCore)
+        if not name.startswith("_") and callable(getattr(HandoverAttributionCore, name, None))
+    ]
+    for name in public_names:
+        if hasattr(CrossModuleService, name):
+            continue
+
+        def proxy(self: Any, *args: Any, __name: str = name, **kwargs: Any) -> Any:
+            return getattr(handover_service, __name)(*args, **kwargs)
+
+        setattr(CrossModuleService, name, proxy)
+
+
+_install_handover_proxies()

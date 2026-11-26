@@ -20,6 +20,22 @@ from app.services.edge_cache import EdgeCacheService
 from app.services.tag_binding import TagBindingService
 from app.services.data_stream import DataStreamService
 from app.services.aggregate_sink import AggregateSinkService
+from app.services.gateway_handover import (
+    DeviceHandoverModuleService,
+    GatewayHandoverService,
+    GatewayMountModuleService,
+    LateReadingModuleService,
+    PointSeriesModuleService,
+    ReceiptItemModuleService,
+)
+
+# 归属处置回执 / 移交登记等联合操作模块的单例
+receipt_service = GatewayHandoverService()
+handover_module_service = DeviceHandoverModuleService()
+receipt_item_service = ReceiptItemModuleService()
+late_reading_service = LateReadingModuleService()
+gateway_mount_service = GatewayMountModuleService()
+point_series_service = PointSeriesModuleService()
 
 SERVICES: dict[str, BaseModuleService] = {
     "device_registry": DeviceRegistryService(),
@@ -40,6 +56,24 @@ SERVICES: dict[str, BaseModuleService] = {
     "tag_binding": TagBindingService(),
     "data_stream": DataStreamService(),
     "aggregate_sink": AggregateSinkService(),
+    # ---- 设备移交 + 迟到读数归属核签 ----
+    "attribution_receipt": receipt_service,
+    "receipt": receipt_service,
+    "handover_receipt": receipt_service,
+    "ownership_receipt": receipt_service,
+    "disposition_receipt": receipt_service,
+    "gateway_handover": handover_module_service,
+    "device_handover": handover_module_service,
+    "handover": handover_module_service,
+    "transfer": handover_module_service,
+    "receipt_item": receipt_item_service,
+    "late_reading": late_reading_service,
+    "reading": late_reading_service,
+    "gateway_mount": gateway_mount_service,
+    "mount_interval": gateway_mount_service,
+    "mount": gateway_mount_service,
+    "point_series": point_series_service,
+    "ts_series": point_series_service,
 }
 
 

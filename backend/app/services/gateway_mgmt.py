@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.services.base import BaseModuleService
+from app.services.gateway_handover import HandoverAttributionCore
 from app.store import store
 
 CST = timezone(timedelta(hours=8))
@@ -21,7 +22,7 @@ def _now_dt() -> datetime:
     return datetime.now(CST)
 
 
-class GatewayMgmtService(BaseModuleService):
+class GatewayMgmtService(HandoverAttributionCore, BaseModuleService):
     MODULE = "gateway_mgmt"
     ENTITY = "网关节点"
     OPERATION_TERM = "接入"
@@ -301,3 +302,59 @@ class GatewayMgmtService(BaseModuleService):
                 "已注册关联设备数": len(devices),
             })
         return result
+
+    # ========== 移交 / 迟到读数核签的通用动作兜底 ==========
+
+    def run_action(self, entry_id: int, action: str) -> tuple[dict[str, Any] | None, str]:
+        """先执行网关既有状态动作；未命中时兜底到移交确认 / 迟到读数核签。"""
+        entry = store.find(self.MODULE, entry_id)
+        if entry is None:
+            return None, f"{self.ENTITY} {entry_id} 不存在或已归档"
+
+        target = self.ACTION_RULES.get(action)
+        if target is not None:
+            entry["status"] = target
+            entry["pending"] = target != self.STATUS_ORDER[-1]
+            entry["abnormal"] = action in self.NEGATIVE_ACTIONS
+            return entry, f"{self.ENTITY}已{action}"
+
+        gw_ids = {str(x) for x in (entry.get("网关编号"), entry.get("网关名称")) if x}
+
+        if "核签" in action or "签" in action or action.strip().lower() in {
+            "sign", "countersign", "verify", "approve", "signoff",
+        }:
+            pending_refs = [
+                item.get("条目编号")
+                for item in store.rows("receipt_item")
+                if item.get("核签状态") == "待核签"
+                and str(item.get("网关编号")) in gw_ids
+                or (
+                    item.get("核签状态") == "待核签"
+                    and str(item.get("报文来源")) in gw_ids
+                )
+            ]
+            if not pending_refs:
+                return entry, "该网关当前没有待核签的迟到读数"
+            result = self.countersign_receipt(None, item_ids=pending_refs)
+            return entry, result.get("message", "核签完成")
+
+        if "确认移交" in action or "移交确认" in action or action.strip() in {"confirm_handover", "confirm_transfer"}:
+            ho_rows = [
+                ho for ho in store.rows("device_handover")
+                if (ho.get("状态") == "办理中" or ho.get("status") == "办理中")
+                and (
+                    str(ho.get("源网关编号")) in gw_ids
+                    or str(ho.get("目标网关编号")) in gw_ids
+                    or str(ho.get("源网关")) in gw_ids
+                    or str(ho.get("目标网关")) in gw_ids
+                )
+            ]
+            if not ho_rows:
+                return entry, "该网关没有办理中的移交单"
+            messages = []
+            for ho in ho_rows:
+                outcome = self.confirm_handover(ho.get("移交编号"))
+                messages.append(outcome.get("message", ""))
+            return entry, "；".join(m for m in messages if m) or "移交已确认"
+
+        return None, f"动作「{action}」不属于{self.MODULE}可执行范围"

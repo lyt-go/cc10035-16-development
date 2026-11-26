@@ -200,14 +200,107 @@ export const MODULES: ModuleMeta[] = [
     actionTargets: {"发起聚合": "执行中", "标记完成": "已完成", "标记延迟": "已延迟"},
     metrics: ["分发任务总数", "待执行任务", "已完成任务"],
   },
+  {
+    key: "attribution_receipt",
+    name: "归属处置回执",
+    entity: "归属处置回执",
+    desc: "核签迟到读数的归属：关联报文来源与移交时间，服务端按实际采样时刻和当时有效的挂载区间决定测点能否收录。",
+    fields: ["回执编号", "移交编号", "设备编号", "测点编号", "移交时间", "报文来源", "待核签数", "状态"],
+    statuses: ["待核签", "部分核签", "已核签"],
+    actions: ["核签"],
+    actionTargets: {"核签": "已核签"},
+    metrics: ["回执总数", "待核签", "已核签"],
+  },
+  {
+    key: "device_handover",
+    name: "设备移交登记",
+    entity: "移交登记",
+    desc: "设备在网关之间的移交登记：办理中不直接更换归属，确认后挂载区间在移交时刻闭合与生效。",
+    fields: ["移交编号", "回执编号", "设备编号", "源网关", "目标网关", "移交时间", "确认时间", "状态"],
+    statuses: ["办理中", "已确认"],
+    actions: ["确认移交"],
+    actionTargets: {"确认移交": "已确认"},
+    metrics: ["移交单总数", "办理中", "已确认"],
+  },
+  {
+    key: "receipt_item",
+    name: "回执条目",
+    entity: "待核签条目",
+    desc: "回执中的逐条迟到读数：可辨认是哪台网关、哪次上送；来源无法证明时留在待核项，不能填入序列。",
+    fields: ["条目编号", "回执编号", "报文编号", "报文来源", "设备编号", "测点编号", "数值", "实际采样时刻", "核签状态"],
+    statuses: ["待核签", "已核签", "重复副本"],
+    actions: ["核签"],
+    actionTargets: {"核签": "已核签"},
+    metrics: ["条目总数", "待核签", "已核签"],
+  },
+  {
+    key: "late_reading",
+    name: "迟到读数",
+    entity: "迟到读数",
+    desc: "网关迟到 / 重发上送的报文读数，记录报文来源、实际上送批次与实际采样时刻。",
+    fields: ["报文编号", "设备编号", "测点编号", "报文来源", "数值", "实际采样时刻", "上送时间", "核验结论"],
+    statuses: ["待核签", "已核签", "重复副本"],
+    actions: [],
+    actionTargets: {},
+    metrics: ["读数总数", "待核签", "重复副本"],
+  },
+  {
+    key: "gateway_mount",
+    name: "挂载区间",
+    entity: "挂载区间",
+    desc: "设备与网关之间带生效时间范围的挂载关系，是核准迟到读数来源的唯一归属依据。",
+    fields: ["挂载编号", "设备编号", "网关编号", "网关名称", "生效起", "生效止", "挂载区间", "状态"],
+    statuses: ["有效", "待接管", "已失效"],
+    actions: [],
+    actionTargets: {},
+    metrics: ["挂载区间总数", "有效", "待接管"],
+  },
+  {
+    key: "point_series",
+    name: "测点确认序列",
+    entity: "确认记录",
+    desc: "仅收录归属核签通过的读数；同一采样位置的重发副本只增加一次，不同网关的合法位置分别入账。",
+    fields: ["记录编号", "测点编号", "设备编号", "实际采样时刻", "数值", "归属网关编号", "归属网关", "来源报文编号", "核签人"],
+    statuses: ["已确认"],
+    actions: [],
+    actionTargets: {},
+    metrics: ["确认记录总数", "测点数", "本网关归属"],
+  },
 ]
 
 export const MODULE_BY_KEY: Map<string, ModuleMeta> = new Map(
   MODULES.map((item) => [item.key, item]),
 )
 
+// 后端为同一领域对象暴露了多个模块 key 别名，前端统一解析到对应元数据。
+const MODULE_KEY_ALIASES: Record<string, string> = {
+  receipt: "attribution_receipt",
+  handover_receipt: "attribution_receipt",
+  ownership_receipt: "attribution_receipt",
+  disposition_receipt: "attribution_receipt",
+  gateway_handover: "device_handover",
+  handover: "device_handover",
+  transfer: "device_handover",
+  reading: "late_reading",
+  mount_interval: "gateway_mount",
+  mount: "gateway_mount",
+  ts_series: "point_series",
+}
+
 export function moduleMeta(key: string): ModuleMeta {
-  const meta = MODULE_BY_KEY.get(key)
-  if (!meta) throw new Error(`没有登记名为 ${key} 的业务模块`)
-  return meta
+  const resolved = MODULE_KEY_ALIASES[key] ?? key
+  const meta = MODULE_BY_KEY.get(resolved) ?? MODULE_BY_KEY.get(key)
+  if (meta) return meta
+  // 未知 key 也不要让整个工作台崩溃：给一份可查询的通用元数据。
+  return {
+    key,
+    name: key,
+    entity: "记录",
+    desc: "通用业务资源列表。",
+    fields: ["编号", "名称", "状态"],
+    statuses: [],
+    actions: [],
+    actionTargets: {},
+    metrics: ["记录总数", "待处理", "异常"],
+  }
 }

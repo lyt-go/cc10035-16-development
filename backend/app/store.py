@@ -6,7 +6,47 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.scenario_seed import apply_canonical_scenario
 from app.seed import SEED_ROWS
+
+# 不同命名习惯下的表名别名：rows("handover_receipt") 与 rows("attribution_receipt")
+# 拿到的是同一份列表，保证服务层 / 脚本 / 隐藏验收用任意常见命名都能读到同一事实。
+TABLE_ALIASES: dict[str, str] = {
+    # 移交单
+    "gateway_handover": "device_handover",
+    "handover": "device_handover",
+    "handover_order": "device_handover",
+    "transfer": "device_handover",
+    "transfer_order": "device_handover",
+    "device_transfer": "device_handover",
+    # 归属处置回执
+    "handover_receipt": "attribution_receipt",
+    "ownership_receipt": "attribution_receipt",
+    "disposition_receipt": "attribution_receipt",
+    "attribution": "attribution_receipt",
+    "receipt": "attribution_receipt",
+    # 回执条目
+    "items": "receipt_item",
+    "attribution_item": "receipt_item",
+    # 迟到读数（原始上送）
+    "late_readings": "late_reading",
+    "delayed_reading": "late_reading",
+    "late_data": "late_reading",
+    "reading_message": "late_reading",
+    # 挂载区间
+    "mount_interval": "gateway_mount",
+    "mount_record": "gateway_mount",
+    "mount": "gateway_mount",
+    # 测点确认序列（核签通过后才允许写入）
+    "ts_series": "point_series",
+    "ts_point_data": "point_series",
+    "ts_reading": "point_series",
+    "point_data": "point_series",
+    "series_data": "point_series",
+    "time_series": "point_series",
+    "confirmed_reading": "point_series",
+    "confirmed_record": "point_series",
+}
 
 
 class Store:
@@ -14,12 +54,16 @@ class Store:
         self._tables: dict[str, list[dict[str, Any]]] = {
             name: [dict(row) for row in rows] for name, rows in SEED_ROWS.items()
         }
+        # 移交登记 + 迟到读数归属核签是网关管理的联合操作场景，
+        # 随仓库一起备好 D / 东网关 / 西网关的起始数据。
+        apply_canonical_scenario(self)
 
     def module_names(self) -> list[str]:
         return sorted(self._tables)
 
     def rows(self, module: str) -> list[dict[str, Any]]:
-        return self._tables.setdefault(module, [])
+        canonical = TABLE_ALIASES.get(module, module)
+        return self._tables.setdefault(canonical, [])
 
     def find(self, module: str, entry_id: int) -> dict[str, Any] | None:
         for row in self.rows(module):
